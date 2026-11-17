@@ -24,21 +24,61 @@ import java.util.zip.ZipInputStream;
 
 public class PluginSecurityService {
 
-    private record Rule(String id, String severity, String pattern, String description) {}
+    private record Rule(String id, String severity, String[] anyPatterns, String[] requiredContext, String description) {}
+
+    // Ignore shaded third-party libraries to avoid false positives
+    private static final List<String> SAFE_LIBRARY_PREFIXES = List.of(
+            "io/netty/", "com/google/", "org/apache/", "org/slf4j/", "ch/qos/logback/",
+            "kotlin/", "kotlinx/", "net/kyori/", "org/yaml/", "com/zaxxer/",
+            "org/bstats/", "org/sqlite/", "com/mysql/", "org/h2/", "org/mariadb/",
+            "org/postgresql/", "com/fasterxml/", "org/json/", "org/jetbrains/",
+            "org/intellij/", "org/checkerframework/", "javax/", "jakarta/",
+            "org/objectweb/asm/", "javassist/", "io/papermc/lib/", "com/github/benmanes/"
+    );
 
     private static final List<Rule> RULES = List.of(
-            new Rule("EXEC_CMD", "HIGH", "java/lang/ProcessBuilder", "Spawns OS system processes (ProcessBuilder)"),
-            new Rule("RUNTIME_EXEC", "HIGH", "getRuntime", "Calls Runtime.getRuntime() (potential command execution)"),
-            new Rule("DISCORD_WEBHOOK", "HIGH", "discord.com/api/webhooks", "Contains hardcoded Discord Webhook URL (possible data exfiltration)"),
-            new Rule("DISCORD_WEBHOOK_OLD", "HIGH", "discordapp.com/api/webhooks", "Contains hardcoded Discord Webhook URL"),
-            new Rule("URL_CLASSLOADER", "HIGH", "java/net/URLClassLoader", "Dynamically loads external classes/JARs at runtime"),
-            new Rule("DEFINE_CLASS", "HIGH", "defineClass", "Reflectively defines bytecode classes in memory"),
-            new Rule("FORCE_OP", "HIGH", "setOp", "Calls setOp() (verify this is an admin/permission plugin)"),
-            new Rule("RAW_SOCKET", "MEDIUM", "java/net/Socket", "Opens raw TCP socket connections"),
-            new Rule("SERVER_SOCKET", "MEDIUM", "java/net/ServerSocket", "Opens a listening TCP server socket"),
-            new Rule("HTTP_URL_CONN", "LOW", "java/net/HttpURLConnection", "Makes outbound HTTP requests (normal for update checkers)"),
-            new Rule("HTTP_CLIENT", "LOW", "java/net/http/HttpClient", "Uses Java HttpClient for outbound HTTP requests"),
-            new Rule("BASE64_DECODE", "LOW", "java/util/Base64$Decoder", "Decodes Base64 payloads (check for obfuscated strings)")
+            new Rule(
+                    "DISCORD_WEBHOOK",
+                    "HIGH",
+                    new String[]{"discord.com/api/webhooks/", "discordapp.com/api/webhooks/"},
+                    null,
+                    "Hardcoded Discord Webhook URL (common token/data exfiltration vector)"
+            ),
+            new Rule(
+                    "SHELL_EXEC",
+                    "HIGH",
+                    new String[]{"/bin/sh", "/bin/bash", "cmd.exe", "powershell.exe", "powershell -"},
+                    new String[]{"ProcessBuilder", "getRuntime", "exec"},
+                    "Executes OS shell commands (cmd / bash / powershell)"
+            ),
+            new Rule(
+                    "REMOTE_PAYLOAD_URL",
+                    "HIGH",
+                    new String[]{"pastebin.com/raw/", "hastebin.com/raw/", "paste.ee/r/", "transfer.sh/"},
+                    null,
+                    "Fetches raw payloads from paste/file-drop services"
+            ),
+            new Rule(
+                    "REMOTE_CLASSLOADER",
+                    "MEDIUM",
+                    new String[]{"java/net/URLClassLoader"},
+                    new String[]{"http://", "https://"},
+                    "Loads external classes/JARs over HTTP(S) at runtime"
+            ),
+            new Rule(
+                    "BYTECODE_INJECTION",
+                    "MEDIUM",
+                    new String[]{"java/lang/instrument/Instrumentation", "VirtualMachine.attach"},
+                    null,
+                    "Uses JVM Attach / Instrumentation API (can modify running server classes)"
+            ),
+            new Rule(
+                    "PROCESS_SPAWN",
+                    "MEDIUM",
+                    new String[]{"java/lang/ProcessBuilder"},
+                    null,
+                    "Spawns an external OS process (verify if intentional)"
+            )
     );
 
     private static final Set<String> EDITABLE_EXT = Set.of(
@@ -124,6 +164,15 @@ public class PluginSecurityService {
         return results;
     }
 
+    private boolean isShadedLibrary(String entryName) {
+        for (String prefix : SAFE_LIBRARY_PREFIXES) {
+            if (entryName.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private JsonObject scanJarFile(String pluginName, File jarFile) throws IOException {
         Map<String, List<String>> hitsByRule = new LinkedHashMap<>();
         int classCount = 0;
@@ -133,20 +182,37 @@ public class PluginSecurityService {
             while ((entry = zis.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
                 String entryName = entry.getName();
-                if (!entryName.endsWith(".class")) continue;
+                if (!entryName.endsWith(".class") || isShadedLibrary(entryName)) continue;
 
                 classCount++;
                 byte[] bytes = readLimited(zis, 2 * 1024 * 1024);
-                // Decode as ISO-8859-1 so UTF-8 / ASCII constant pool strings remain searchable
                 String content = new String(bytes, StandardCharsets.ISO_8859_1);
 
                 for (Rule rule : RULES) {
-                    if (content.contains(rule.pattern())) {
-                        hitsByRule.computeIfAbsent(rule.id(), k -> new ArrayList<>());
-                        List<String> classes = hitsByRule.get(rule.id());
-                        if (classes.size() < 8) {
-                            classes.add(entryName);
+                    boolean matchedPrimary = false;
+                    for (String p : rule.anyPatterns()) {
+                        if (content.contains(p)) {
+                            matchedPrimary = true;
+                            break;
                         }
+                    }
+                    if (!matchedPrimary) continue;
+
+                    if (rule.requiredContext() != null) {
+                        boolean matchedCtx = false;
+                        for (String ctx : rule.requiredContext()) {
+                            if (content.contains(ctx)) {
+                                matchedCtx = true;
+                                break;
+                            }
+                        }
+                        if (!matchedCtx) continue;
+                    }
+
+                    hitsByRule.computeIfAbsent(rule.id(), k -> new ArrayList<>());
+                    List<String> classes = hitsByRule.get(rule.id());
+                    if (classes.size() < 8) {
+                        classes.add(entryName);
                     }
                 }
             }
@@ -154,18 +220,14 @@ public class PluginSecurityService {
 
         int highCount = 0;
         int medCount = 0;
-        int lowCount = 0;
         JsonArray findings = new JsonArray();
 
         for (Rule rule : RULES) {
             List<String> matchedClasses = hitsByRule.get(rule.id());
             if (matchedClasses == null || matchedClasses.isEmpty()) continue;
 
-            switch (rule.severity()) {
-                case "HIGH" -> highCount++;
-                case "MEDIUM" -> medCount++;
-                default -> lowCount++;
-            }
+            if ("HIGH".equals(rule.severity())) highCount++;
+            else medCount++;
 
             JsonObject f = new JsonObject();
             f.addProperty("id", rule.id());
@@ -178,11 +240,11 @@ public class PluginSecurityService {
         }
 
         String verdict;
-        if (highCount >= 2 || (highCount >= 1 && medCount >= 1)) {
+        if (highCount >= 1) {
             verdict = "HIGH_RISK";
-        } else if (highCount == 1 || medCount >= 1) {
+        } else if (medCount >= 2) {
             verdict = "SUSPICIOUS";
-        } else if (lowCount > 0) {
+        } else if (medCount == 1) {
             verdict = "LOW_RISK";
         } else {
             verdict = "CLEAN";
@@ -195,7 +257,7 @@ public class PluginSecurityService {
         out.addProperty("verdict", verdict);
         out.addProperty("highCount", highCount);
         out.addProperty("mediumCount", medCount);
-        out.addProperty("lowCount", lowCount);
+        out.addProperty("lowCount", 0);
         out.add("findings", findings);
         return out;
     }
