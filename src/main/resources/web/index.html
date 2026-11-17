@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SeaPanel — Server Dashboard</title>
+  <script>
+    (function() {
+      const saved = localStorage.getItem('seapanel_theme');
+      if (saved) document.documentElement.setAttribute('data-theme', saved);
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- LOGIN VIEW -->
+  <div id="loginView" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="server-icon-box lg" data-server-icon></div>
+        <div>
+          <h1 class="login-title">SeaPanel</h1>
+          <p class="login-subtitle" id="loginServerName">Minecraft Server Dashboard</p>
+        </div>
+      </div>
+      <form id="loginForm" class="login-form">
+        <label class="field-label" for="loginPassword">Dashboard Password</label>
+        <input id="loginPassword" type="password" class="input" placeholder="Enter password from config.yml" autocomplete="current-password" required>
+        <p id="loginError" class="error-text hidden"></p>
+        <button type="submit" class="btn btn-primary btn-full" id="loginBtn">Sign In</button>
+      </form>
+      <p class="login-hint">Tip: Check your server console or <code>plugins/SeaPanel/config.yml</code> for the password.</p>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="appView" class="hidden">
+    <header class="navbar">
+      <div class="nav-container">
+        <div class="nav-left">
+          <a href="#overview" class="logo" data-tab="overview">
+            <span class="server-icon-box sm" data-server-icon></span>
+            <span class="logo-text" id="navServerName">SeaPanel</span>
+          </a>
+          <span class="status-pill" id="serverStatusPill">
+            <span class="dot"></span>
+            <span id="serverVersionText">Connecting...</span>
+          </span>
+        </div>
+
+        <nav class="nav-menu">
+          <button class="nav-link active" data-tab="overview">Overview</button>
+          <button class="nav-link" data-tab="players">Players <span class="count-badge" id="navPlayerCount">0</span></button>
+          <button class="nav-link" data-tab="plugins">Plugins &amp; Security</button>
+          <button class="nav-link" data-tab="console">Console</button>
+          <button class="nav-link" data-tab="worlds">Worlds</button>
+
+          <button id="themeToggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+            <svg id="themeIcon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          </button>
+          <button id="logoutBtn" class="icon-btn" title="Sign out" aria-label="Sign out">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="main-container">
+      <!-- OVERVIEW TAB -->
+      <section id="tab-overview" class="tab-panel active">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Server Overview</h2>
+            <p class="page-subtitle" id="motdText">Loading server status...</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" id="btnSaveAll">Save All</button>
+            <button class="btn btn-danger" id="btnStopServer">Stop Server</button>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="card stat-card">
+            <div class="stat-label">TPS (1m / 5m / 15m)</div>
+            <div class="stat-value mono" id="statTps">--</div>
+            <div class="stat-meta" id="statMspt">MSPT: -- ms</div>
+            <svg id="tpsSparkline" viewBox="0 0 200 28" preserveAspectRatio="none" style="width:100%;height:26px;margin-top:8px;display:block;"></svg>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-label">Online Players</div>
+            <div class="stat-value mono" id="statPlayers">0 / 0</div>
+            <div class="progress-track"><div class="progress-fill" id="playersBar" style="width:0%"></div></div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-label">Memory (JVM)</div>
+            <div class="stat-value mono" id="statMemory">-- MB</div>
+            <div class="progress-track"><div class="progress-fill" id="memoryBar" style="width:0%"></div></div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-label">CPU &amp; Uptime</div>
+            <div class="stat-value mono" id="statCpu">--%</div>
+            <div class="stat-meta" id="statUptime">Uptime: --</div>
+          </div>
+        </div>
+
+        <div class="two-col-grid">
+          <div class="card">
+            <h3 class="card-title">Broadcast Message</h3>
+            <p class="card-desc">Send an announcement to all online players.</p>
+            <form id="broadcastForm" class="inline-form">
+              <input type="text" id="broadcastInput" class="input" placeholder="Server restarting in 5 minutes..." required>
+              <button type="submit" class="btn btn-primary">Send</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Server Info</h3>
+            <div class="kv-list">
+              <div class="kv-row"><span>Version</span><span class="mono" id="infoVersion">--</span></div>
+              <div class="kv-row"><span>Default Gamemode</span><span class="mono" id="infoGamemode">--</span></div>
+              <div class="kv-row"><span>Whitelist</span><span class="mono" id="infoWhitelist">--</span></div>
+              <div class="kv-row"><span>Worlds / Plugins</span><span class="mono" id="infoCounts">--</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLAYERS TAB -->
+      <section id="tab-players" class="tab-panel">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Players</h2>
+            <p class="page-subtitle">Manage online players, inventory, teleport, and bans.</p>
+          </div>
+          <div class="header-actions">
+            <input type="text" id="playerSearch" class="input input-sm" placeholder="Filter by name...">
+            <button class="btn btn-secondary" id="btnViewBans">Banned List</button>
+          </div>
+        </div>
+
+        <div id="playersGrid" class="players-grid"></div>
+        <div id="playersEmpty" class="empty-state hidden">No players currently online.</div>
+      </section>
+
+      <!-- PLUGINS & SECURITY TAB -->
+      <section id="tab-plugins" class="tab-panel">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Plugins &amp; Security</h2>
+            <p class="page-subtitle">Scan plugin JARs for malware/backdoors and edit configuration files.</p>
+          </div>
+          <div class="header-actions">
+            <input type="text" id="pluginSearch" class="input input-sm" placeholder="Filter plugins...">
+            <button class="btn btn-secondary" id="btnServerConfigs">Server Configs</button>
+            <button class="btn btn-primary" id="btnScanAllPlugins">Scan All Plugins</button>
+          </div>
+        </div>
+
+        <div id="pluginsGrid" class="plugins-grid"></div>
+      </section>
+
+      <!-- CONSOLE TAB -->
+      <section id="tab-console" class="tab-panel">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Live Console</h2>
+            <p class="page-subtitle">Real-time server logs and command execution.</p>
+          </div>
+          <div class="header-actions">
+            <label class="toggle-chip">
+              <input type="checkbox" id="autoScrollCheck" checked>
+              <span>Auto-scroll</span>
+            </label>
+            <button class="btn btn-secondary" id="btnClearConsole">Clear View</button>
+          </div>
+        </div>
+
+        <div class="console-shell">
+          <div id="consoleOutput" class="console-output"></div>
+          <div class="console-quick">
+            <button class="chip-btn" data-cmd="list">list</button>
+            <button class="chip-btn" data-cmd="tps">tps</button>
+            <button class="chip-btn" data-cmd="save-all">save-all</button>
+            <button class="chip-btn" data-cmd="whitelist list">whitelist list</button>
+          </div>
+          <form id="consoleForm" class="console-input-row">
+            <span class="console-prompt">&gt;</span>
+            <input type="text" id="consoleInput" class="console-input" placeholder="Type a server command (without /)..." autocomplete="off">
+            <button type="submit" class="btn btn-primary btn-sm">Run</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- WORLDS & SETTINGS TAB -->
+      <section id="tab-worlds" class="tab-panel">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">Worlds &amp; Settings</h2>
+            <p class="page-subtitle">Control world time, weather, difficulty, and server whitelist.</p>
+          </div>
+        </div>
+
+        <div id="worldsGrid" class="worlds-grid"></div>
+
+        <div class="two-col-grid" style="margin-top: 20px;">
+          <div class="card">
+            <div class="card-head-row">
+              <div>
+                <h3 class="card-title">Whitelist</h3>
+                <p class="card-desc">Restrict server access to approved players.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="whitelistToggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <form id="whitelistAddForm" class="inline-form" style="margin-top: 14px;">
+              <input type="text" id="whitelistNameInput" class="input" placeholder="Player username..." required>
+              <button type="submit" class="btn btn-primary">Add</button>
+            </form>
+            <div id="whitelistPlayers" class="chip-list"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Default Gamemode</h3>
+            <p class="card-desc">Applied to new players joining the server.</p>
+            <div class="btn-group" style="margin-top: 14px;">
+              <button class="btn btn-secondary gm-default-btn" data-gm="SURVIVAL">Survival</button>
+              <button class="btn btn-secondary gm-default-btn" data-gm="CREATIVE">Creative</button>
+              <button class="btn btn-secondary gm-default-btn" data-gm="ADVENTURE">Adventure</button>
+              <button class="btn btn-secondary gm-default-btn" data-gm="SPECTATOR">Spectator</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- PLAYER DETAIL MODAL -->
+  <div id="playerModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="playerModal"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-player-id">
+          <img id="modalPlayerAvatar" class="player-avatar lg" src="" alt="">
+          <div>
+            <h3 id="modalPlayerName">Player</h3>
+            <p id="modalPlayerMeta" class="mono muted-sm"></p>
+          </div>
+        </div>
+        <button class="icon-btn" data-close="playerModal">&times;</button>
+      </div>
+      <div class="modal-body" id="playerModalBody"></div>
+    </div>
+  </div>
+
+  <!-- BANS MODAL -->
+  <div id="bansModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="bansModal"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Banned Players</h3>
+        <button class="icon-btn" data-close="bansModal">&times;</button>
+      </div>
+      <div class="modal-body" id="bansModalBody"></div>
+    </div>
+  </div>
+
+  <!-- SECURITY SCAN REPORT MODAL -->
+  <div id="scanModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="scanModal"></div>
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3 id="scanModalTitle">Security Scan Report</h3>
+          <p id="scanModalSub" class="muted-sm mono"></p>
+        </div>
+        <button class="icon-btn" data-close="scanModal">&times;</button>
+      </div>
+      <div class="modal-body" id="scanModalBody"></div>
+    </div>
+  </div>
+
+  <!-- CONFIG EDITOR MODAL -->
+  <div id="editorModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="editorModal"></div>
+    <div class="modal-card modal-xl">
+      <div class="modal-header">
+        <div>
+          <h3 id="editorModalTitle">Config Editor</h3>
+          <p id="editorFilePath" class="muted-sm mono">Select a file to edit</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-sm" id="editorSaveBtn" disabled>Save File</button>
+          <button class="icon-btn" data-close="editorModal">&times;</button>
+        </div>
+      </div>
+      <div class="editor-layout">
+        <aside class="editor-sidebar" id="editorFileList"></aside>
+        <div class="editor-main">
+          <textarea id="editorTextarea" class="code-editor" spellcheck="false" placeholder="Select a config file from the left panel..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUSTOM DIALOG MODAL (replaces native browser prompt/confirm) -->
+  <div id="dialogModal" class="modal hidden">
+    <div class="modal-backdrop" id="dialogBackdrop"></div>
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h3 id="dialogTitle">Confirm</h3>
+        <button class="icon-btn" id="dialogCloseBtn">&times;</button>
+      </div>
+      <form id="dialogForm" class="modal-body">
+        <p id="dialogMessage" class="muted-sm"></p>
+        <div id="dialogInputWrap" class="hidden">
+          <input type="text" id="dialogInput" class="input" autocomplete="off">
+          <div id="dialogPresets" class="chip-list" style="margin-top: 10px;"></div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="dialogCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="dialogConfirmBtn">Confirm</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

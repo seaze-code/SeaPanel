@@ -1,0 +1,18 @@
+name: SeaPanel
+version: '1.0.0'
+main: xyz.seaze.seapanel.SeaPanelPlugin
+api-version: '1.21'
+authors: [Sea]
+description: Embedded Web Dashboard for Paper/Purpur servers (1.21.11 - 26.3+)
+website: https://github.com/seaze-code
+
+commands:
+  seapanel:
+    description: Manage SeaPanel web dashboard
+    usage: /seapanel <info|reload|password <new>>
+    permission: seapanel.admin
+
+permissions:
+  seapanel.admin:
+    description: Allows managing SeaPanel settings from in-game or console
+    default: op
